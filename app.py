@@ -23,88 +23,41 @@ def load_data():
 df, df_plz = load_data()
 
 # -----------------------------------------------------------------------------
-# Basic cleaning
+# Tiny preprocessing
 
-df = df.copy()
-df_plz = df_plz.copy()
-
-# make plz_2 match in both dataframes
-df["plz_2"] = df["plz_2"].astype(str).str.zfill(2)
-df_plz["plz_2"] = df_plz["plz_2"].astype(str).str.zfill(2)
-
-# rent per square meter
 df["rent_sqr_m"] = df["baseRent"] / df["livingSpace"]
-
-# building age group
-df["building_age_group"] = np.where(df["yearConstructed"] >= 2010, "New", "Old")
-
-# remove unrealistic values for cleaner plots
 df = df[(df["rent_sqr_m"] > 0) & (df["rent_sqr_m"] < 50)]
 
+df["building_age_group"] = np.where(df["yearConstructed"] >= 2010, "New", "Old")
+
 # -----------------------------------------------------------------------------
-# Region summary
+# Regional summary including the number of listing per region, rent/sqr m per region, population per region, offers/1000 people per region
+# and the new investment score im computing
 
-offers_by_region = (
-    df.groupby("plz_2")
-    .size()
-    .reset_index(name="offer_count")
-)
-
-rent_by_region = (
-    df.groupby("plz_2")["rent_sqr_m"]
-    .mean()
-    .reset_index(name="avg_rent_sqr_m")
-)
-
-region_summary = offers_by_region.merge(rent_by_region, on="plz_2", how="left")
-
-# use one row per region from df_plz
 region_info = (
     df_plz[["plz_2", "region_name", "population"]]
     .drop_duplicates(subset="plz_2")
 )
 
-region_summary = region_summary.merge(region_info, on="plz_2", how="left")
-
-region_summary["offers_per_1000"] = (
-    region_summary["offer_count"] / region_summary["population"] * 1000
+region_summary = (
+    df.groupby("plz_2")
+    .agg(
+        offer_count=("plz_2", "size"),
+        avg_rent_sqr_m=("rent_sqr_m", "mean")
+    )
+    .reset_index()
+    .merge(region_info, on="plz_2", how="left")
 )
 
-region_summary["investment_score"] = (
-    region_summary["avg_rent_sqr_m"] / region_summary["offers_per_1000"]
-)
+region_summary["offers_per_1000"] = region_summary["offer_count"] / region_summary["population"] * 1000
+region_summary["investment_score"] = region_summary["avg_rent_sqr_m"] / region_summary["offers_per_1000"]
 
-region_summary = region_summary.replace([np.inf, -np.inf], np.nan)
-region_summary = region_summary.dropna(
+region_summary = region_summary.replace([np.inf, -np.inf], np.nan).dropna(
     subset=["avg_rent_sqr_m", "offers_per_1000", "investment_score"]
 )
 
-
-
 # -----------------------------------------------------------------------------
-# Feature impact
-
-feature_cols = ["balcony", "lift", "garden", "cellar", "hasKitchen", "newlyConst"]
-
-feature_rows = []
-
-for col in feature_cols:
-    temp = df[[col, "rent_sqr_m"]].dropna()
-
-    avg_yes = temp[temp[col] == True]["rent_sqr_m"].mean()
-    avg_no = temp[temp[col] == False]["rent_sqr_m"].mean()
-
-    feature_rows.append({
-        "feature": col,
-        "impact_on_rent_sqr_m": avg_yes - avg_no
-    })
-
-feature_impact = pd.DataFrame(feature_rows)
-feature_impact = feature_impact.sort_values("impact_on_rent_sqr_m", ascending=True)
-
-# -----------------------------------------------------------------------------
-# Map data
-# dissolve df_plz to one geometry per region
+# Preparing data for making the map
 
 gdf_regions = df_plz.dissolve(by="plz_2", aggfunc="first").reset_index()
 
@@ -115,48 +68,44 @@ gdf_regions = gdf_regions.merge(
 )
 
 # -----------------------------------------------------------------------------
-# Centered layout
+# Start of the app
 
-left, center, right = st.columns([1, 2, 1])
-
-# -----------------------------------------------------------------------------
-# Title
+left, center, right = st.columns([1, 3, 1])
 
 with center:
-    st.title("German  _housing_!")
+    st.title("German  _housing market_ analysis")
 
     """
-    This dashboard explores the German housing market from the perspective of a
-    residential developer.
+    This dashboard explores the German rental market to identify high potential investment regions 
+    and determin what features drive rental prices. By comparing regional supply, pricing and apartment features 
+    the analysis provides insights to support more informed, data-driven investment decision.
 
-    The goal is to answer four questions: how the market is structured, where it
-    may be worth building, what kind of apartments may create more value, and
-    which regions appear most attractive overall.
+    The analysis was structured around the following parts:
+    - Regional based analysis of the rental market.
+    - Identification of most promising locations.
+    - Relationship between property features and rent prices.
+    
     """
 
 # -----------------------------------------------------------------------------
 # Part I
 
 with center:
-    st.markdown("## Part I: Market structure")
+    st.markdown("## Part I: Regional market overview")
 
     """
-    **How does a selected city compare to the national rent distribution, and
-    which regions appear relatively undersupplied?**
+    **The following section provides visualisations that help better understand the 
+    overall rental market in Germany by providing the rent price distribution accross 
+    the contry as well as showing the offer count for each region.**
     """
+# ---------------- GRAPH 1
 
     st.subheader("Rent distribution by city compared to Germany")
 
     city_list = sorted(df["geo_krs"].dropna().astype(str).unique())
-    
     default_city = "Berlin"
-    
-    if default_city in city_list:
-        default_index = city_list.index(default_city)
-    else:
-        default_index = 0
+    default_index = city_list.index(default_city)
     selected_city = st.selectbox("Choose a city", city_list, index=default_index)
-
     df_city = df[df["geo_krs"].astype(str) == selected_city]
 
     germany_median = df["rent_sqr_m"].median()
@@ -164,7 +113,6 @@ with center:
 
     fig_hist = go.Figure()
 
-    # Germany in the background
     fig_hist.add_trace(
         go.Histogram(
             x=df["rent_sqr_m"],
@@ -176,7 +124,6 @@ with center:
         )
     )
 
-    # Selected city on top
     fig_hist.add_trace(
         go.Histogram(
             x=df_city["rent_sqr_m"],
@@ -184,11 +131,10 @@ with center:
             name=selected_city,
             opacity=0.75,
             histnorm="probability density",
-            marker_color="cornflowerblue"
+            marker_color="#2F80ED"
         )
     )
 
-    # Germany median line
     fig_hist.add_vline(
         x=germany_median,
         line_color="lightgray",
@@ -196,7 +142,6 @@ with center:
         line_dash="dash"
     )
 
-    # City median line
     fig_hist.add_vline(
         x=city_median,
         line_color="royalblue",
@@ -216,20 +161,24 @@ with center:
 
     fig_hist.update_layout(
         barmode="overlay",
-        title=f"Rent distribution in {selected_city} compared to Germany",
-        xaxis_title="Rent per square meter",
+        xaxis_title="Rent level (€/m²)",
         yaxis_title=None,
         xaxis=dict(range=[0, 35]),
-        yaxis=dict(visible=False)
+        yaxis=dict(visible=False),
+        margin=dict(t=10),
+        legend=dict(
+            font=dict(size=14)
+        )
     )
 
     st.plotly_chart(fig_hist, use_container_width=True)
     
+    
     """
-    The full German market stays in the background, while the selected city is
-    shown on top. This makes every city directly comparable to the national
-    distribution.
+    Regions for which the distribution is shifted to the right and the median is higher that for Germany 
+    could be potential markets with higher returns for investors.
     """
+# ---------------- GRAPH 2
 
     st.subheader("Offers relative to population")
 
@@ -241,11 +190,12 @@ with center:
         locations="plz_2",
         featureidkey="properties.plz_2",
         color="offers_per_1000",
+        labels={"offers_per_1000": "Offers per <b>1000 residents"},
+        color_continuous_scale="dense",
         mapbox_style="carto-positron",
         zoom=4.3,
         center={"lat": 51.2, "lon": 10.4},
-        opacity=0.75,
-        title="Offers per 1000 people by region"
+        opacity=0.8
     )
 
     fig_map.update_traces(
@@ -258,7 +208,7 @@ with center:
     )
 
     fig_map.update_layout(
-        margin={"r": 0, "t": 50, "l": 0, "b": 0}
+        margin={"r": 0, "t": 0, "l": 0, "b": 0}
     )
 
     st.plotly_chart(fig_map, use_container_width=True)
@@ -266,152 +216,101 @@ with center:
 # -----------------------------------------------------------------------------
 # Part II
 
-
 with center:
     st.markdown("## Part II: Where to build?")
 
     """
-    **Which regions reward modern buildings, and which regions combine low
-    supply with high rent?**
+    This section help further identify what regions have high investment potential, 
+    by checking what areas have a preference for newly constructed building and what 
+    areas have a low supply of offers availiable combined with higher rent.
     """
+# ---------------- GRAPH 3
 
-    st.subheader("Where do newer buildings command the strongest premium?")
+    st.subheader("What regions have the biggest rent gap based on building age?")
 
-    # -----------------------------------------------------------------------------
-    # New vs old premium by region
-
-    new_old_summary = (
+    df_grouped = (
         df.groupby(["plz_2", "building_age_group"])["rent_sqr_m"]
         .mean()
+        .unstack()
         .reset_index()
     )
 
-    new_old_pivot = new_old_summary.pivot(
-        index="plz_2",
-        columns="building_age_group",
-        values="rent_sqr_m"
-    ).reset_index()
+    df_grouped["premium"] = df_grouped["New"] - df_grouped["Old"]
+    df_grouped = df_grouped.merge(region_info, on="plz_2", how="left")
 
-    new_old_pivot.columns.name = None
-
-    if "New" not in new_old_pivot.columns:
-        new_old_pivot["New"] = np.nan
-    if "Old" not in new_old_pivot.columns:
-        new_old_pivot["Old"] = np.nan
-
-    new_old_pivot["premium_new_minus_old"] = new_old_pivot["New"] - new_old_pivot["Old"]
-
-    new_old_pivot = new_old_pivot.merge(region_info, on="plz_2", how="left")
-    new_old_pivot = new_old_pivot.dropna(subset=["New", "Old", "premium_new_minus_old"])
-
-    # regions where old is more expensive
-    bottom = new_old_pivot[new_old_pivot["premium_new_minus_old"] < 0].copy()
-
-    # regions where new is more expensive
-    top_6 = (
-        new_old_pivot[new_old_pivot["premium_new_minus_old"] > 0]
-        .sort_values("premium_new_minus_old", ascending=False)
-        .head(6)
-        .copy()
+    df_display = (
+        df_grouped.sort_values("premium", ascending=False)
+        .head(8)
     )
 
-    # combine them
-    premium_display = pd.concat([bottom, top_6], ignore_index=True)
+    fig = go.Figure()
 
-    # shorter labels
-    premium_display["region_label"] = premium_display["region_name"].str.replace(" area", "", regex=False)
-
-    # sort by difference so "old-valued" are together and "new-valued" are together
-    premium_display = premium_display.sort_values("premium_new_minus_old", ascending=True)
-
-    # where to place the difference label
-    premium_display["label_x"] = premium_display[["New", "Old"]].max(axis=1) + 0.4
-
-    # -----------------------------------------------------------------------------
-    # Create overlay bar chart
-
-    fig_premium = go.Figure()
-
-    # Old bars in background
-    fig_premium.add_trace(
+    fig.add_trace(
         go.Bar(
-            x=premium_display["Old"],
-            y=premium_display["region_label"],
-            orientation="h",
-            name="Old buildings",
+            x=df_display["region_name"],
+            y=df_display["New"],
+            name="New buildings <br>(newer that 2010)",
+            marker_color="#2F80ED",
+            opacity=0.8
+        )
+    )
+    
+    fig.add_trace(
+        go.Bar(
+            x=df_display["region_name"],
+            y=df_display["Old"],
+            name="Old buildings <br>(older than 2010)",
             marker_color="lightgray",
-            opacity=0.95,
-            hovertemplate=(
-                "<b>%{y}</b><br>"
-                "Old buildings: %{x:.2f} €/m²<extra></extra>"
-            )
+            opacity=1
         )
     )
 
-    # New bars on top
-    fig_premium.add_trace(
-        go.Bar(
-            x=premium_display["New"],
-            y=premium_display["region_label"],
-            orientation="h",
-            name="New buildings",
-            marker_color="royalblue",
-            opacity=0.85,
-            hovertemplate=(
-                "<b>%{y}</b><br>"
-                "New buildings: %{x:.2f} €/m²<extra></extra>"
-            )
-        )
-    )
-
-    # Difference labels
-    fig_premium.add_trace(
+    fig.add_trace(
         go.Scatter(
-            x=premium_display["label_x"],
-            y=premium_display["region_label"],
+            x=df_display["region_name"],
+            y=df_display[["New", "Old"]].max(axis=1) + 0.5,
             mode="text",
-            text=[f"{v:+.2f}" for v in premium_display["premium_new_minus_old"]],
-            textfont=dict(color="dimgray", size=12),
+            text=[f"{v:+.2f}" for v in df_display["premium"]],
+            textfont=dict(color="black", size=14),
             showlegend=False,
             hoverinfo="skip"
         )
     )
 
-    fig_premium.update_layout(
+    fig.update_layout(
         barmode="overlay",
-        title="New vs old building rents in regions with the strongest differences",
         plot_bgcolor="white",
         xaxis_title=None,
         yaxis_title=None,
-        showlegend=True
+        xaxis_tickangle=-30,
+        margin=dict(t=10),
+        legend=dict(
+            font=dict(size=14)
+        )
     )
-
-    fig_premium.update_xaxes(
+    
+    fig.update_yaxes(
         showgrid=False,
-        zeroline=False,
-        showticklabels=False,
-        range=[0, premium_display["label_x"].max() + 1]
+        showticklabels=False
     )
-
-    fig_premium.update_yaxes(
+    fig.update_xaxes(
         showgrid=False
     )
 
-    st.plotly_chart(fig_premium, use_container_width=True)
+    st.plotly_chart(fig, use_container_width=True)
 
+    st.markdown(""" 
+    Newly constructed buildings are valued amongst all regions.
+    Presented on the visualisation markets have the highest difference in rents between old and new building,
+    suggesting higher potential returns for new developers.    
+    """)
 
-# -----------------------------------------------------------------------------
+# ---------------- GRAPH 4
 
     st.subheader("Supply pressure vs rent")
 
-    # -----------------------------------------------------------------------------
-    # Calculate median split
-
     x_median = region_summary["offers_per_1000"].median()
     y_median = region_summary["avg_rent_sqr_m"].median()
-
-    # -----------------------------------------------------------------------------
-    # Create figure
 
     fig_scatter = go.Figure()
 
@@ -421,85 +320,100 @@ with center:
             y=region_summary["avg_rent_sqr_m"],
             mode="markers",
             marker=dict(
-                color="royalblue",
-                size=9,
-                opacity=0.75
+                color="#2F80ED",
+                size=10,
+                opacity=0.8
             ),
-            customdata=region_summary[["region_name"]],
+            customdata=region_summary[["region_name"]].to_numpy(),
             hovertemplate=(
                 "<b>%{customdata[0]}</b><br>"
-                "Offers per 1000 people: %{x:.2f}<br>"
+                "Offers per 1000 residents: %{x:.2f}<br>"
                 "Average rent: %{y:.2f} €/m²<extra></extra>"
             ),
             showlegend=False
         )
     )
 
-    # -----------------------------------------------------------------------------
-    # Quadrant divider lines
-
     fig_scatter.add_vline(
         x=x_median,
-        line_width=1.5,
+        line_width=2,
         line_dash="dash",
-        line_color="gray"
+        line_color="lightgray"
     )
 
     fig_scatter.add_hline(
         y=y_median,
-        line_width=1.5,
+        line_width=2,
         line_dash="dash",
-        line_color="gray"
+        line_color="lightgray"
     )
 
-    # -----------------------------------------------------------------------------
-    # Quadrant labels
-
-    x_min = region_summary["offers_per_1000"].min()
-    x_max = region_summary["offers_per_1000"].max()
-    y_min = region_summary["avg_rent_sqr_m"].min()
-    y_max = region_summary["avg_rent_sqr_m"].max()
+    fig_scatter.add_shape(
+        type="rect",
+        x0=-15,
+        x1=x_median,
+        y0=y_median,
+        y1=27,
+        fillcolor="aliceblue",
+        line=dict(width=0),
+        layer="below"
+    )
 
     fig_scatter.add_annotation(
-        x=(x_min + x_median) / 2,
-        y=(y_median + y_max) / 2,
+        x=0.02,
+        y=0.95,
+        xref="paper",
+        yref="paper",
         text="Low supply<br>High rent",
         showarrow=False,
-        font=dict(size=12, color="gray")
+        font=dict(size=12, color="black"),
+        align="left"
     )
 
     fig_scatter.add_annotation(
-        x=(x_median + x_max) / 2,
-        y=(y_median + y_max) / 2,
+        x=0.98,
+        y=0.95,
+        xref="paper",
+        yref="paper",
         text="High supply<br>High rent",
         showarrow=False,
-        font=dict(size=12, color="gray")
+        font=dict(size=12, color="black"),
+        align="right"
     )
 
     fig_scatter.add_annotation(
-        x=(x_min + x_median) / 2,
-        y=(y_min + y_median) / 2,
+        x=0.02,
+        y=0.05,
+        xref="paper",
+        yref="paper",
         text="Low supply<br>Low rent",
         showarrow=False,
-        font=dict(size=12, color="gray")
+        font=dict(size=12, color="black"),
+        align="left"
     )
 
     fig_scatter.add_annotation(
-        x=(x_median + x_max) / 2,
-        y=(y_min + y_median) / 2,
+        x=0.98,
+        y=0.05,
+        xref="paper",
+        yref="paper",
         text="High supply<br>Low rent",
         showarrow=False,
-        font=dict(size=12, color="gray")
+        font=dict(size=12, color="black"),
+        align="right"
+    )
+    
+    fig_scatter.update_yaxes(
+        range=[-3, 27]
+    )
+    fig_scatter.update_xaxes(
+        range=[-15, 310]
     )
 
-    # -----------------------------------------------------------------------------
-    # Axis labels for "low" and "high" feeling
-
     fig_scatter.update_layout(
-        title="Regional housing markets by supply pressure and rent level",
         plot_bgcolor="white",
         xaxis=dict(
-            title="Supply (offers per 1000 people)",
+            title="Supply (offers per 1000 residents)",
             showgrid=False,
             zeroline=False
         ),
@@ -507,10 +421,16 @@ with center:
             title="Rent level (€/m²)",
             showgrid=False,
             zeroline=False
-        )
+        ),
+        margin=dict(l=20, r=20, t=20, b=20)
     )
 
     st.plotly_chart(fig_scatter, use_container_width=True)
+
+    st.markdown("""
+    Regions in the highlighted, top-left quadrant combine high rents with relatively low supply, 
+    making them the most attractive areas for new investments. Regions with high supply and lower rents may indicate more saturated markets.
+    """)
 
 # -----------------------------------------------------------------------------
 # Part III
@@ -523,58 +443,92 @@ with center:
     appears most price-efficient for new buildings?**
     """
 
-    st.subheader("Feature impact on rent")
+# ---------------- GRAPH 5
 
+df_new = df[df["yearConstructed"] >= 2010]
+feature_cols = ["balcony", "lift", "garden", "cellar", "hasKitchen"]
+
+feature_rows = []
+
+for col in feature_cols:
+    temp = df_new[[col, "rent_sqr_m"]].dropna()
+
+    avg_yes = temp[temp[col] == True]["rent_sqr_m"].mean()
+    avg_no = temp[temp[col] == False]["rent_sqr_m"].mean()
+
+    feature_rows.append({
+        "feature": col,
+        "impact_on_rent_sqr_m": avg_yes - avg_no
+    })
+
+feature_impact = pd.DataFrame(feature_rows)
+feature_impact["feature"] = feature_impact["feature"].replace({
+    "balcony": "Balcony",
+    "lift": "Lift",
+    "garden": "Garden",
+    "cellar": "Cellar",
+    "hasKitchen": "Kitchen"
+})
+
+feature_impact = feature_impact.sort_values("impact_on_rent_sqr_m", ascending=True)
+
+feature_impact["label"] = feature_impact["impact_on_rent_sqr_m"].apply(
+    lambda x: f"+{x:.2f}" if x > 0 else f"{x:.2f}"
+)
+
+colors = [
+    "#2F80ED" if v > 0 else "#B0B0B0"
+    for v in feature_impact["impact_on_rent_sqr_m"]
+]
+
+with center:
+    st.subheader("Feature impact on rent (€/m²) for buildings newer than 2010")
+    
     fig_features = px.bar(
         feature_impact,
         x="impact_on_rent_sqr_m",
         y="feature",
         orientation="h",
-        text="impact_on_rent_sqr_m",
-        title="Estimated feature premium on rent per square meter",
-        labels={
-            "impact_on_rent_sqr_m": "Average rent premium (€/m²)",
-            "feature": "Feature"
-        }
+        text="label",
+        opacity=0.8
+    )
+    fig_features.update_traces(marker_color=colors)
+    
+    fig_features.update_traces(
+        textposition="outside",
+        textfont=dict(size=14, color="black")
     )
 
-    fig_features.update_traces(texttemplate="%{text:.2f}", textposition="outside")
+    fig_features.update_xaxes(
+        visible=False
+    )
+
+    fig_features.update_layout(
+        yaxis_title=None,
+        plot_bgcolor="white",
+        margin=dict(t=10)
+    )
+
     st.plotly_chart(fig_features, use_container_width=True)
 
-# ---------------------
+# ---------------- GRAPH 6
 
-  
-
-    st.subheader("Apartment size vs rent per square meter for newer buildings")
-
-    # -----------------------------------------------------------------------------
-    # Prepare data
+    st.subheader("Apartment size vs rent per square meter for buildings newer than 2010")
+    n_points = len(df_new)
+    sample_size = min(n_points, 5000)
+    df_sample = df_new.sample(n=sample_size, random_state=42)
+    st.caption(f"Showing {sample_size:,} out of {n_points:,} data points")
 
     df_new = df[df["building_age_group"] == "New"].copy()
-
-    # add region_name into df_new using plz_2
     df_new = df_new.merge(
         region_info[["plz_2", "region_name"]],
         on="plz_2",
         how="left"
     )
 
-    df_new = df_new.dropna(subset=["livingSpace", "rent_sqr_m", "region_name"])
-
-    # crop outliers for cleaner view
-    df_new = df_new[
-        (df_new["livingSpace"] <= 250) &
-        (df_new["rent_sqr_m"] <= 40)
-    ].copy()
-
-    # -----------------------------------------------------------------------------
-    # Region selector
-
     region_list = sorted(df_new["region_name"].dropna().unique())
-
     default_region = "Berlin area"
     default_index = region_list.index(default_region) if default_region in region_list else 0
-
     selected_region = st.selectbox(
         "Highlight a region",
         region_list,
@@ -582,14 +536,6 @@ with center:
     )
 
     df_region = df_new[df_new["region_name"] == selected_region].copy()
-
-    # -----------------------------------------------------------------------------
-    # Optional sampling for background points
-
-    df_sample = df_new.sample(n=5000, random_state=42) if len(df_new) > 5000 else df_new
-
-    # -----------------------------------------------------------------------------
-    # Build trend line from binned averages
 
     df_new["size_bin"] = pd.cut(df_new["livingSpace"], bins=30)
 
@@ -601,12 +547,8 @@ with center:
 
     trend["size_mid"] = trend["size_bin"].apply(lambda x: x.mid)
 
-    # -----------------------------------------------------------------------------
-    # Create figure
-
     fig_size = go.Figure()
 
-    # All regions in background
     fig_size.add_trace(
         go.Scatter(
             x=df_sample["livingSpace"],
@@ -622,7 +564,6 @@ with center:
         )
     )
 
-    # Selected region highlighted
     fig_size.add_trace(
         go.Scatter(
             x=df_region["livingSpace"],
@@ -643,7 +584,6 @@ with center:
         )
     )
 
-    # Overall trend line
     fig_size.add_trace(
         go.Scatter(
             x=trend["size_mid"],
@@ -654,14 +594,11 @@ with center:
         )
     )
 
-    # -----------------------------------------------------------------------------
-    # Layout
-
     fig_size.update_layout(
-        title="How rent per m² changes with apartment size in newer buildings",
         xaxis_title="Apartment size (m²)",
-        yaxis_title="Rent per m²",
-        plot_bgcolor="white"
+        yaxis_title="Rent level (€/m²)",
+        plot_bgcolor="white",
+        margin=dict(t=10)
     )
 
     fig_size.update_xaxes(
@@ -670,13 +607,15 @@ with center:
     )
 
     fig_size.update_yaxes(
-        range=[0, 40],
+        range=[0, 35],
         showgrid=False
     )
 
     st.plotly_chart(fig_size, use_container_width=True)
 
-# -----------------------------------------------------------------------------
+
+# END OF NICE GRAPHS -------------------
+
 # Part IV
 
 with center:
