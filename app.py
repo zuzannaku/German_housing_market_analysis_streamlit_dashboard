@@ -30,7 +30,9 @@ df = df[(df["rent_sqr_m"] > 0) & (df["rent_sqr_m"] < 50)]
 
 df["building_age_group"] = np.where(df["yearConstructed"] >= 2010, "New", "Old")
 
+
 # -----------------------------------------------------------------------------
+# Tiny feature engineering
 # Regional summary including the number of listing per region, rent/sqr m per region, population per region, offers/1000 people per region
 # and the new investment score im computing
 
@@ -76,13 +78,13 @@ with center:
     st.title("German  _housing market_ analysis")
 
     """
-    This dashboard explores the German rental market to identify high potential investment regions 
-    and determin what features drive rental prices. By comparing regional supply, pricing and apartment features 
-    the analysis provides insights to support more informed, data-driven investment decision.
+    This dashboard explores the German rental market to find areas with high potential for investments 
+    and identify the features that influence rent prices. It considers factors such as regional supply, pricing and apartment features 
+    to provide insights and support more informed, data-driven investment decisions.
 
     The analysis was structured around the following parts:
     - Regional based analysis of the rental market.
-    - Identification of most promising locations.
+    - Identification of most promising areas.
     - Relationship between property features and rent prices.
     
     """
@@ -94,15 +96,21 @@ with center:
     st.markdown("## Part I: Regional market overview")
 
     """
-    **The following section provides visualisations that help better understand the 
-    overall rental market in Germany by providing the rent price distribution accross 
-    the contry as well as showing the offer count for each region.**
+    The following section provides figures that help better understand the 
+    overall rental market in Germany. This part is crucial for creating context for the 
+    more complex figures in the following parts of the dashboard.
     """
 # ---------------- GRAPH 1
 
     st.subheader("Rent distribution by city compared to Germany")
 
-    city_list = sorted(df["geo_krs"].dropna().astype(str).unique())
+    city_list = sorted(
+        df["geo_krs"]
+        .dropna()
+        .astype(str)
+        .str.replace("_", " ", regex=False)
+        .unique()
+    )
     default_city = "Berlin"
     default_index = city_list.index(default_city)
     selected_city = st.selectbox("Choose a city", city_list, index=default_index)
@@ -213,6 +221,11 @@ with center:
 
     st.plotly_chart(fig_map, use_container_width=True)
 
+    """
+    Regions with higher offer density may suggest a more competitive local market, 
+    while those with low offer density could signify worse availability of offers, 
+    which then could lead to overstated rent prices.
+    """
 # -----------------------------------------------------------------------------
 # Part II
 
@@ -220,9 +233,11 @@ with center:
     st.markdown("## Part II: Where to build?")
 
     """
-    This section help further identify what regions have high investment potential, 
-    by checking what areas have a preference for newly constructed building and what 
-    areas have a low supply of offers availiable combined with higher rent.
+    This section help further identify what regions have high investment potential. 
+    It explores areas with preference for newly constructed buildings and those that 
+    combine low supply of available offers and high rent prices. Those regions are most 
+    likely to be a "seller's market" and are therefore, the ideal location for a new investment.
+    
     """
 # ---------------- GRAPH 3
 
@@ -302,7 +317,7 @@ with center:
     st.markdown(""" 
     Newly constructed buildings are valued amongst all regions.
     Presented on the visualisation markets have the highest difference in rents between old and new building,
-    suggesting higher potential returns for new developers.    
+    suggesting higher potential returns for new properties.    
     """)
 
 # ---------------- GRAPH 4
@@ -428,8 +443,10 @@ with center:
     st.plotly_chart(fig_scatter, use_container_width=True)
 
     st.markdown("""
-    Regions in the highlighted, top-left quadrant combine high rents with relatively low supply, 
-    making them the most attractive areas for new investments. Regions with high supply and lower rents may indicate more saturated markets.
+    Regions in the highlighted, top-left quadrant combine high rents with relatively low supply, signifying a seller's market, 
+    where demand is higher that supply. 
+    This makes them the most attractive areas for new investments. On the other hand regions with high supply and 
+    lower rents may indicate more saturated markets in the country.
     """)
 
 # -----------------------------------------------------------------------------
@@ -439,8 +456,8 @@ with center:
     st.markdown("## Part III: What to build?")
 
     """
-    **Which features are associated with higher rents, and what apartment size
-    appears most price-efficient for new buildings?**
+    After identifying key markets for investments, another important insight is to find what kind of features drive rents higher, and what apartment size
+    is the most price-efficient.
     """
 
 # ---------------- GRAPH 5
@@ -506,14 +523,19 @@ with center:
     fig_features.update_layout(
         yaxis_title=None,
         plot_bgcolor="white",
-        margin=dict(t=10)
+        margin=dict(t=10, b=10)
     )
 
     st.plotly_chart(fig_features, use_container_width=True)
 
+    """
+    The results of this visualisation show what features are the most valuable for customers. 
+    In the proccess of planing the property development, in order to maximalize the profit, it is important to consider exacly these features.
+    """
+
 # ---------------- GRAPH 6
 
-    st.subheader("Apartment size vs rent per square meter for buildings newer than 2010")
+    st.subheader("Apartment size vs rent for buildings newer than 2010")
     n_points = len(df_new)
     sample_size = min(n_points, 5000)
     df_sample = df_new.sample(n=sample_size, random_state=42)
@@ -613,40 +635,86 @@ with center:
 
     st.plotly_chart(fig_size, use_container_width=True)
 
+    """
+    The overall trend of the rent level based on apartment size, presents a 
+    very important insight regarding the optimal size of the properties.
+    For smaller apartments we see a rapid decline until it reaches area 50m². Beyond this point, 
+    the rent per square meter remains relatively constant, suggesting diminishing returns to size. 
+    This means that appartment with their total area below 50m² could be the most price-efficient and bring in the most profit.
+    """
 
 # END OF NICE GRAPHS -------------------
 
 # Part IV
 
 with center:
-    st.markdown("## Part IV: Final investment score")
+    st.markdown("## Part IV: Final investment scores")
 
     """
-    **Which regions combine high rent with relatively low supply?**
+    **Top 10 regions that combine high rent with low supply**
     """
 
-    top_10_score = region_summary.sort_values("investment_score", ascending=False).head(10)
+    top_10_score = (
+    region_summary
+    .sort_values("investment_score", ascending=False)
+    .head(10)
+)
+
+    top_10_score["label"] = top_10_score["investment_score"].apply(lambda x: f"{x:.2f}")
 
     fig_score = px.bar(
-        top_10_score.sort_values("investment_score", ascending=True),
+        top_10_score,
         x="investment_score",
         y="region_name",
         orientation="h",
-        text="investment_score",
-        title="Top 10 regions by investment score",
-        labels={
-            "investment_score": "Investment score",
-            "region_name": "Region"
-        }
+        text="label",
+        opacity=0.8
     )
 
-    fig_score.update_traces(texttemplate="%{text:.2f}", textposition="outside")
+    fig_score.update_traces(
+        marker_color="#2F80ED",
+        textposition="outside",
+        textfont=dict(size=14, color="black")
+    )
+
+    fig_score.update_xaxes(
+        visible=False
+    )
+    
+    fig_score.update_yaxes(
+        autorange="reversed"
+    )
+
+    fig_score.update_layout(
+        xaxis_title=None,
+        yaxis_title=None,
+        plot_bgcolor="white",
+        margin=dict(t=10, b=20)
+    )
+
     st.plotly_chart(fig_score, use_container_width=True)
 
     st.subheader("Top 10 regions table")
-
+    
+    top_10_score_again = (
+        region_summary
+        .sort_values("investment_score", ascending=False)
+        .head(10)
+    )
+    
     st.dataframe(
-        top_10_score[
+        top_10_score_again[
             ["region_name", "offer_count", "population", "offers_per_1000", "avg_rent_sqr_m", "investment_score"]
         ].reset_index(drop=True)
     )
+    st.markdown("## Conclusion")
+    
+    """
+    The investment score combines the information about regional offer count, regional population, rent price and apartment size.
+    This way we indentified top 10 potential regions for future property development that should be the topic of future, more detailed analysis.
+    Additoinally, we recognised what apartment features are the most relevant for customers. A lift increases the rent per square meter on average by 1.85€, 
+    while a furnished kitchen by 2.36€. 
+    The last insigh, regarding the optimal size of the apartment, suggest that total area below 50m² is the most price-efficient and could bring the best return on investment.
+
+    """
+    
