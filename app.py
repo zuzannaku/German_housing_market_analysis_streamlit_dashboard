@@ -108,12 +108,13 @@ with center:
         df["geo_krs"]
         .dropna()
         .astype(str)
+        .str.replace("_", " ", regex=False)
         .unique()
     )
     default_city = "Berlin"
     default_index = city_list.index(default_city)
     selected_city = st.selectbox("Choose a city", city_list, index=default_index)
-    df_city = df[df["geo_krs"].astype(str) == selected_city]
+    df_city = df[df["geo_krs"].astype(str).str.replace("_", " ", regex=False) == selected_city]
 
     germany_median = df["rent_sqr_m"].median()
     city_median = df_city["rent_sqr_m"].median()
