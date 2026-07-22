@@ -108,7 +108,6 @@ with center:
         df["geo_krs"]
         .dropna()
         .astype(str)
-        .str.replace("_", " ", regex=False)
         .unique()
     )
     default_city = "Berlin"
