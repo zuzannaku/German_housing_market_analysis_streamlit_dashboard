@@ -192,7 +192,7 @@ with center:
 
     geojson_data = gdf_regions.__geo_interface__
 
-    fig_map = px.choropleth_mapbox(
+    fig_map = px.choropleth_map(
         gdf_regions,
         geojson=geojson_data,
         locations="plz_2",
@@ -200,7 +200,7 @@ with center:
         color="offers_per_1000",
         labels={"offers_per_1000": "Offers per <b>1000 residents"},
         color_continuous_scale="dense",
-        mapbox_style="carto-positron",
+        map_style="carto-positron",
         zoom=4.3,
         center={"lat": 51.2, "lon": 10.4},
         opacity=0.8
